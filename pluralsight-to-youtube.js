@@ -3,12 +3,11 @@
 /**
  * Pluralsight Channel -> YouTube Playlist Sync Tool
  *
- * Prerequisites:
- *   1. Launch Chrome with remote debugging:
- *      /Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome \
- *        --remote-debugging-port=9222 --user-data-dir=/tmp/chrome-debug
- *   2. Log into both Pluralsight and YouTube in that browser
- *   3. Run: node pluralsight-to-youtube.js <channel-url> [options]
+ * Chrome launches automatically with a persistent profile (~/.training-tools/chrome-data)
+ * so that your Pluralsight and YouTube logins are remembered between runs.
+ *
+ * First run: log into both Pluralsight and YouTube when the browser opens.
+ * Subsequent runs: sessions are preserved, no login needed.
  *
  * Examples:
  *   node pluralsight-to-youtube.js https://app.pluralsight.com/channels/details/b45dfedb-...
@@ -16,9 +15,7 @@
  *   node pluralsight-to-youtube.js https://app.pluralsight.com/channels/details/b45dfedb-... --dry-run
  */
 
-import { connectChrome, scrapePlurasightChannel, createYoutubePlaylist } from './lib.js';
-
-const CDP_URL = process.env.CDP_URL || 'http://127.0.0.1:9222';
+import { launchBrowser, scrapePlurasightChannel, createYoutubePlaylist } from './lib.js';
 
 // ---------------------------------------------------------------------------
 // CLI parsing
@@ -34,25 +31,25 @@ Usage: node pluralsight-to-youtube.js <pluralsight-channel-url> [options]
 Options:
   --name <name>    Override playlist name (default: channel title from Pluralsight)
   --dry-run        Scrape and list videos without creating a playlist
-  --cdp <url>      Chrome DevTools Protocol URL (default: ${CDP_URL})
+  --headless       Run Chrome in headless mode (default: visible)
+  --cdp <url>      Connect to existing Chrome via CDP instead of auto-launching
   -h, --help       Show this help message
 
-Prerequisites:
-  Launch Chrome with remote debugging enabled and log into Pluralsight + YouTube:
-
-    /Applications/Google\\ Chrome.app/Contents/MacOS/Google\\ Chrome \\
-      --remote-debugging-port=9222 --user-data-dir=/tmp/chrome-debug
+Chrome launches automatically with a persistent profile at ~/.training-tools/chrome-data.
+On first run, log into Pluralsight and YouTube. Sessions are preserved for future runs.
 `);
     process.exit(0);
   }
 
-  const opts = { channelUrl: null, playlistName: null, dryRun: false, cdpUrl: CDP_URL };
+  const opts = { channelUrl: null, playlistName: null, dryRun: false, cdpUrl: null, headless: false };
 
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--name' && args[i + 1]) {
       opts.playlistName = args[++i];
     } else if (args[i] === '--dry-run') {
       opts.dryRun = true;
+    } else if (args[i] === '--headless') {
+      opts.headless = true;
     } else if (args[i] === '--cdp' && args[i + 1]) {
       opts.cdpUrl = args[++i];
     } else if (!args[i].startsWith('-')) {
@@ -80,15 +77,20 @@ Prerequisites:
 async function main() {
   const opts = parseArgs();
 
-  let browser, page;
+  let cleanup;
+  let page;
   try {
-    ({ browser, page } = await connectChrome(opts.cdpUrl));
-  } catch {
-    console.error(`\nError: Cannot connect to Chrome at ${opts.cdpUrl}`);
-    console.error('Make sure Chrome is running with --remote-debugging-port=9222');
-    console.error('\nLaunch command:');
-    console.error('  /Applications/Google\\ Chrome.app/Contents/MacOS/Google\\ Chrome \\');
-    console.error('    --remote-debugging-port=9222 --user-data-dir=/tmp/chrome-debug');
+    ({ page, cleanup } = await launchBrowser({
+      cdpUrl: opts.cdpUrl,
+      headless: opts.headless,
+    }));
+  } catch (err) {
+    console.error(`\nError: Failed to launch Chrome: ${err.message}`);
+    if (opts.cdpUrl) {
+      console.error(`Make sure Chrome is running and accessible at ${opts.cdpUrl}`);
+    } else {
+      console.error('Make sure Google Chrome is installed on this system.');
+    }
     process.exit(1);
   }
 
@@ -130,8 +132,7 @@ async function main() {
     console.log(`\nDone! Playlist "${playlistName}" should now have ${videos.length} videos.`);
 
   } finally {
-    await page.close();
-    await browser.close();
+    await cleanup();
   }
 }
 

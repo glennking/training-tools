@@ -1,14 +1,47 @@
 import { chromium } from 'playwright';
+import { homedir } from 'os';
+import { join } from 'path';
+
+const DEFAULT_DATA_DIR = join(homedir(), '.training-tools', 'chrome-data');
 
 /**
- * Connect to a Chrome instance via CDP.
- * Returns { browser, context, page }.
+ * Launch or connect to a Chrome browser.
+ *
+ * By default, launches Chrome with a persistent profile at ~/.training-tools/chrome-data
+ * so that Pluralsight/YouTube logins survive between runs.
+ *
+ * Options:
+ *   cdpUrl   - If set, connect to an existing Chrome instance via CDP instead of launching.
+ *   dataDir  - Custom persistent profile directory (default: ~/.training-tools/chrome-data).
+ *   headless - Run headless (default: false — you need to see the browser to log in).
+ *
+ * Returns { browser, context, page, cleanup() }.
+ * Call cleanup() when done instead of manually closing browser/page.
  */
-export async function connectChrome(cdpUrl = 'http://127.0.0.1:9222') {
-  const browser = await chromium.connectOverCDP(cdpUrl);
-  const context = browser.contexts()[0];
-  const page = await context.newPage();
-  return { browser, context, page };
+export async function launchBrowser(opts = {}) {
+  const { cdpUrl, dataDir = DEFAULT_DATA_DIR, headless = false } = opts;
+
+  if (cdpUrl) {
+    const browser = await chromium.connectOverCDP(cdpUrl);
+    const context = browser.contexts()[0];
+    const page = await context.newPage();
+    return {
+      browser, context, page,
+      async cleanup() { await page.close(); await browser.close(); },
+    };
+  }
+
+  const context = await chromium.launchPersistentContext(dataDir, {
+    channel: 'chrome',
+    headless,
+    args: ['--disable-blink-features=AutomationControlled'],
+    viewport: null,
+  });
+  const page = context.pages()[0] || await context.newPage();
+  return {
+    browser: null, context, page,
+    async cleanup() { await context.close(); },
+  };
 }
 
 /**
