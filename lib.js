@@ -45,7 +45,27 @@ export async function launchBrowser(opts = {}) {
 }
 
 /**
+ * Ensure the page is logged into Pluralsight.
+ * If a login redirect is detected, waits for the user to complete login.
+ * Returns true if login was required, false if already logged in.
+ */
+export async function ensureLoggedIn(page, targetUrl) {
+  await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+  await page.waitForTimeout(3000);
+
+  if (!page.url().includes('/id')) return false;
+
+  console.error('Pluralsight login required. Please log in using the Chrome window...');
+  await page.waitForFunction(() => !window.location.href.includes('/id'), { timeout: 180000 });
+  // Navigate to the original target after login redirect
+  await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+  await page.waitForTimeout(3000);
+  return true;
+}
+
+/**
  * Scrape YouTube video URLs from a Pluralsight channel page.
+ * Assumes the page is already logged in (call ensureLoggedIn first).
  * Returns { channelTitle, videos: [{ url, title }] }
  */
 export async function scrapePlurasightChannel(page, channelUrl) {
@@ -91,8 +111,17 @@ export async function scrapePlurasightChannel(page, channelUrl) {
       if (seen.has(url)) continue;
       seen.add(url);
 
-      const title = a.textContent.trim() || 'Untitled';
-      results.push({ url, title });
+      // Try to find a title from the link text or nearby elements
+      let title = a.textContent.trim();
+      if (!title) {
+        // Look for a heading or title element in a parent container
+        const container = a.closest('[class*="content"]') || a.closest('[class*="card"]') || a.closest('[class*="item"]') || a.closest('li');
+        if (container) {
+          const heading = container.querySelector('h1,h2,h3,h4,h5,h6,[class*="title"],[class*="name"]');
+          if (heading) title = heading.textContent.trim();
+        }
+      }
+      results.push({ url, title: title || 'Untitled' });
     }
 
     return results;

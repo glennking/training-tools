@@ -15,7 +15,7 @@
  *   node pluralsight-to-youtube.js https://app.pluralsight.com/channels/details/b45dfedb-... --dry-run
  */
 
-import { launchBrowser, scrapePlurasightChannel, createYoutubePlaylist } from './lib.js';
+import { launchBrowser, ensureLoggedIn, scrapePlurasightChannel, createYoutubePlaylist } from './lib.js';
 
 // ---------------------------------------------------------------------------
 // CLI parsing
@@ -95,8 +95,14 @@ async function main() {
   }
 
   try {
-    // Step 1: Scrape Pluralsight channel
-    console.log(`\nScraping Pluralsight channel: ${opts.channelUrl}`);
+    // Step 1: Ensure logged in, then scrape
+    console.log(`\nNavigating to Pluralsight channel: ${opts.channelUrl}`);
+    const loginRequired = await ensureLoggedIn(page, opts.channelUrl);
+    if (loginRequired) {
+      console.log('Login completed successfully.');
+    }
+
+    console.log('Scraping channel...');
     const { channelTitle, videos } = await scrapePlurasightChannel(page, opts.channelUrl);
 
     if (videos.length === 0) {
