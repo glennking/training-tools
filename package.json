@@ -1,0 +1,12 @@
+{
+  "name": "training-tools",
+  "version": "1.0.0",
+  "description": "Tools for syncing Pluralsight channels to YouTube playlists",
+  "type": "module",
+  "scripts": {
+    "sync": "node pluralsight-to-youtube.js"
+  },
+  "dependencies": {
+    "playwright": "^1.58.0"
+  }
+}
