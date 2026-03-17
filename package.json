@@ -1,12 +1,19 @@
 {
   "name": "training-tools",
   "version": "1.0.0",
-  "description": "Tools for syncing Pluralsight channels to YouTube playlists",
+  "description": "MCP server and CLI for syncing Pluralsight channels to YouTube playlists",
   "type": "module",
+  "bin": {
+    "training-tools-mcp": "./mcp-server.js",
+    "pluralsight-to-youtube": "./pluralsight-to-youtube.js"
+  },
   "scripts": {
-    "sync": "node pluralsight-to-youtube.js"
+    "sync": "node pluralsight-to-youtube.js",
+    "mcp": "node mcp-server.js"
   },
   "dependencies": {
-    "playwright": "^1.58.0"
+    "@modelcontextprotocol/sdk": "^1.27.0",
+    "playwright": "^1.58.0",
+    "zod": "^3.24.0"
   }
 }

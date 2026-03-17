@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "training-tools": {
+      "command": "node",
+      "args": ["mcp-server.js"],
+      "cwd": "."
+    }
+  }
+}

@@ -16,7 +16,7 @@
  *   node pluralsight-to-youtube.js https://app.pluralsight.com/channels/details/b45dfedb-... --dry-run
  */
 
-import { chromium } from 'playwright';
+import { connectChrome, scrapePlurasightChannel, createYoutubePlaylist } from './lib.js';
 
 const CDP_URL = process.env.CDP_URL || 'http://127.0.0.1:9222';
 
@@ -74,171 +74,15 @@ Prerequisites:
 }
 
 // ---------------------------------------------------------------------------
-// Step 1 – Scrape YouTube URLs from Pluralsight channel
-// ---------------------------------------------------------------------------
-
-async function scrapePlurasightChannel(page, channelUrl) {
-  console.log(`\nScraping Pluralsight channel: ${channelUrl}`);
-
-  await page.goto(channelUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
-  await page.waitForTimeout(5000);
-
-  // Scroll to load all content
-  let previousHeight = 0;
-  for (let i = 0; i < 20; i++) {
-    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
-    await page.waitForTimeout(2000);
-    const currentHeight = await page.evaluate(() => document.body.scrollHeight);
-    if (currentHeight === previousHeight) break;
-    previousHeight = currentHeight;
-  }
-
-  // Get channel title
-  const channelTitle = await page.title();
-  // Strip " | Pluralsight" suffix if present
-  const cleanTitle = channelTitle.replace(/\s*\|\s*Pluralsight\s*$/, '').trim();
-
-  // Extract YouTube links with titles
-  const videos = await page.evaluate(() => {
-    const links = Array.from(document.querySelectorAll('a[href]'));
-    const seen = new Set();
-    const results = [];
-
-    for (const a of links) {
-      const href = a.href;
-      if (!href.includes('youtube.com/watch') && !href.includes('youtu.be/')) continue;
-
-      // Normalize URL — strip playlist params to get clean video URL
-      let url;
-      try {
-        const parsed = new URL(href);
-        if (parsed.hostname.includes('youtu.be')) {
-          url = `https://www.youtube.com/watch?v=${parsed.pathname.slice(1)}`;
-        } else {
-          const videoId = parsed.searchParams.get('v');
-          if (!videoId) continue;
-          url = `https://www.youtube.com/watch?v=${videoId}`;
-        }
-      } catch {
-        continue;
-      }
-
-      if (seen.has(url)) continue;
-      seen.add(url);
-
-      const title = a.textContent.trim() || 'Untitled';
-      results.push({ url, title });
-    }
-
-    return results;
-  });
-
-  return { channelTitle: cleanTitle, videos };
-}
-
-// ---------------------------------------------------------------------------
-// Step 2 – Create YouTube playlist and add videos
-// ---------------------------------------------------------------------------
-
-async function createYoutubePlaylist(page, playlistName, videos) {
-  console.log(`\nCreating YouTube playlist: "${playlistName}"`);
-  console.log(`Adding ${videos.length} videos...\n`);
-
-  let playlistCreated = false;
-
-  for (let i = 0; i < videos.length; i++) {
-    const { url, title } = videos[i];
-    const label = `[${i + 1}/${videos.length}]`;
-    console.log(`${label} ${title}`);
-    console.log(`     ${url}`);
-
-    try {
-      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
-      await page.waitForTimeout(4000);
-
-      // Click "Save to playlist" (button is in overflow, use JS click)
-      const hasSaveBtn = await page.evaluate(() => {
-        const btn = document.querySelector('button[aria-label="Save to playlist"]');
-        if (btn) { btn.click(); return true; }
-        return false;
-      });
-
-      if (!hasSaveBtn) {
-        console.log(`     -> SKIP: Save button not found (may not be a valid video)`);
-        continue;
-      }
-
-      await page.waitForTimeout(2000);
-
-      if (!playlistCreated) {
-        // First video — create the playlist
-        await page.evaluate(() => {
-          document.querySelector('button[aria-label="Create new playlist"]').click();
-        });
-        await page.waitForTimeout(2000);
-
-        // Fill playlist name via JS (placeholder overlay blocks normal clicks)
-        await page.evaluate((name) => {
-          const textarea = document.querySelector('ytd-popup-container textarea[placeholder="Choose a title"]');
-          if (!textarea) throw new Error('Playlist name textarea not found');
-          textarea.focus();
-          textarea.value = name;
-          textarea.dispatchEvent(new Event('input', { bubbles: true }));
-          textarea.dispatchEvent(new Event('change', { bubbles: true }));
-        }, playlistName);
-        await page.waitForTimeout(1000);
-
-        // Click Create
-        await page.evaluate(() => {
-          document.querySelector('ytd-popup-container button[aria-label="Create"]').click();
-        });
-        await page.waitForTimeout(3000);
-
-        playlistCreated = true;
-        console.log(`     -> Created playlist & added`);
-      } else {
-        // Subsequent videos — check the playlist checkbox
-        const result = await page.evaluate((name) => {
-          const buttons = document.querySelectorAll('ytd-popup-container button');
-          for (const btn of buttons) {
-            if (btn.textContent.includes(name)) {
-              const isChecked = btn.getAttribute('aria-pressed') === 'true' ||
-                                btn.querySelector('svg path[d*="check"]') !== null;
-              if (isChecked) return 'already-added';
-              btn.click();
-              return 'added';
-            }
-          }
-          return 'not-found';
-        }, playlistName);
-
-        console.log(`     -> ${result}`);
-        await page.waitForTimeout(1000);
-      }
-
-      // Close dialog
-      await page.keyboard.press('Escape');
-      await page.waitForTimeout(500);
-
-    } catch (err) {
-      console.log(`     -> ERROR: ${err.message.split('\n')[0]}`);
-      await page.keyboard.press('Escape').catch(() => {});
-      await page.waitForTimeout(500);
-    }
-  }
-}
-
-// ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 
 async function main() {
   const opts = parseArgs();
 
-  // Verify Chrome is reachable
-  let browser;
+  let browser, page;
   try {
-    browser = await chromium.connectOverCDP(opts.cdpUrl);
+    ({ browser, page } = await connectChrome(opts.cdpUrl));
   } catch {
     console.error(`\nError: Cannot connect to Chrome at ${opts.cdpUrl}`);
     console.error('Make sure Chrome is running with --remote-debugging-port=9222');
@@ -248,11 +92,9 @@ async function main() {
     process.exit(1);
   }
 
-  const defaultContext = browser.contexts()[0];
-  const page = await defaultContext.newPage();
-
   try {
     // Step 1: Scrape Pluralsight channel
+    console.log(`\nScraping Pluralsight channel: ${opts.channelUrl}`);
     const { channelTitle, videos } = await scrapePlurasightChannel(page, opts.channelUrl);
 
     if (videos.length === 0) {
@@ -275,7 +117,15 @@ async function main() {
     }
 
     // Step 2: Create playlist and add videos
-    await createYoutubePlaylist(page, playlistName, videos);
+    console.log(`\nCreating YouTube playlist: "${playlistName}"`);
+    console.log(`Adding ${videos.length} videos...\n`);
+
+    const results = await createYoutubePlaylist(page, playlistName, videos);
+    results.forEach(r => {
+      console.log(`[${r.index}/${videos.length}] ${r.title}`);
+      console.log(`     ${r.url}`);
+      console.log(`     -> ${r.status}${r.reason ? ': ' + r.reason : ''}`);
+    });
 
     console.log(`\nDone! Playlist "${playlistName}" should now have ${videos.length} videos.`);
 
