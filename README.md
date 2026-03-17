@@ -36,7 +36,7 @@ node pluralsight-to-youtube.js <url> --headless
 node pluralsight-to-youtube.js <url> --cdp http://127.0.0.1:9222
 ```
 
-On first run, Chrome will open and you'll need to log into both Pluralsight and YouTube. After that, your sessions are persisted at `~/.training-tools/chrome-data`.
+On first run, Chrome will open and you'll need to log into both Pluralsight and YouTube. After that, your sessions are saved automatically (see [Authentication](#authentication) below).
 
 ## MCP Server (for Claude)
 
@@ -71,6 +71,23 @@ Run the server over stdio:
 ```bash
 node mcp-server.js
 ```
+
+## Authentication
+
+Auth state (cookies and localStorage) is saved to `~/.training-tools/auth.json` using Playwright's `storageState` API. This means:
+
+- **First run:** Chrome opens and prompts you to log into Pluralsight and YouTube. After login, the auth state is saved immediately.
+- **Subsequent runs:** Auth is restored automatically — no login needed.
+- **Crash-safe:** Auth is saved to a JSON file on disk, not just the browser profile. Even if Chrome is killed mid-run, your logins are preserved.
+- **Session expiry:** If cookies expire, the tool detects the login redirect and prompts you to log in again.
+
+To reset saved auth (e.g., to switch accounts):
+
+```bash
+rm ~/.training-tools/auth.json
+```
+
+All auth data is stored locally at `~/.training-tools/` and is never transmitted anywhere.
 
 ## How it works
 
