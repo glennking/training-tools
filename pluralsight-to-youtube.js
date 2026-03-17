@@ -15,7 +15,7 @@
  *   node pluralsight-to-youtube.js https://app.pluralsight.com/channels/details/b45dfedb-... --dry-run
  */
 
-import { launchBrowser, ensureLoggedIn, scrapePlurasightChannel, createYoutubePlaylist } from './lib.js';
+import { launchBrowser, ensureLoggedIn, ensureYouTubeLoggedIn, scrapePlurasightChannel, createYoutubePlaylist } from './lib.js';
 
 // ---------------------------------------------------------------------------
 // CLI parsing
@@ -124,7 +124,12 @@ async function main() {
       return;
     }
 
-    // Step 2: Create playlist and add videos
+    // Step 2: Ensure YouTube login, then create playlist
+    const ytLoginRequired = await ensureYouTubeLoggedIn(page);
+    if (ytLoginRequired) {
+      console.log('YouTube login completed successfully.');
+    }
+
     console.log(`\nCreating YouTube playlist: "${playlistName}"`);
     console.log(`Adding ${videos.length} videos...\n`);
 

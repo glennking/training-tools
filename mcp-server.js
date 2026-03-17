@@ -3,7 +3,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
-import { launchBrowser, ensureLoggedIn, scrapePlurasightChannel, createYoutubePlaylist } from './lib.js';
+import { launchBrowser, ensureLoggedIn, ensureYouTubeLoggedIn, scrapePlurasightChannel, createYoutubePlaylist } from './lib.js';
 
 const server = new McpServer({
   name: 'training-tools',
@@ -112,6 +112,7 @@ server.tool(
         };
       }
 
+      await ensureYouTubeLoggedIn(page);
       const name = playlistName || channelTitle;
       const results = await createYoutubePlaylist(page, name, videos);
 
