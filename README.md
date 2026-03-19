@@ -40,12 +40,13 @@ On first run, Chrome will open and you'll need to log into both Pluralsight and 
 
 ## MCP Server (for Claude)
 
-The MCP server exposes two tools:
+The MCP server exposes three tools:
 
 | Tool | Description |
 |------|-------------|
 | `scrape-pluralsight-channel` | Scrape a Pluralsight channel and return the list of YouTube videos |
 | `sync-pluralsight-to-youtube` | Scrape a channel and create a YouTube playlist with the videos |
+| `check-watch-status` | Check watch progress for videos in the YouTube playlist matching a Pluralsight channel |
 
 ### Claude Code
 
