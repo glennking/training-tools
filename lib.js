@@ -206,6 +206,101 @@ export async function scrapePlurasightChannel(page, channelUrl) {
 }
 
 /**
+ * Check watch status for videos in a YouTube playlist.
+ * Navigates to the user's YouTube library, finds the playlist by name,
+ * and checks each video for the watched progress bar overlay.
+ * Returns { playlistName, videos: [{ title, url, watched }], summary }
+ */
+export async function checkPlaylistWatchStatus(page, playlistName) {
+  // Navigate to the user's playlists page
+  await page.goto('https://www.youtube.com/feed/playlists', { waitUntil: 'domcontentloaded', timeout: 60000 });
+  await page.waitForTimeout(4000);
+
+  // Scroll to load all playlists
+  for (let i = 0; i < 10; i++) {
+    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+    await page.waitForTimeout(2000);
+  }
+
+  // Collect all playlist cards: find each "View full playlist" link,
+  // walk up to the card container, and extract the title from there.
+  const playlists = await page.evaluate(() => {
+    const links = document.querySelectorAll('a[href*="playlist?list="]');
+    const results = [];
+    const seen = new Set();
+    for (const link of links) {
+      const href = link.href;
+      if (seen.has(href)) continue;
+      seen.add(href);
+      // Walk up to find the enclosing card/shelf element
+      let container = link.closest('ytd-grid-playlist-renderer, ytd-rich-item-renderer, ytd-playlist-renderer, ytd-compact-station-renderer');
+      if (!container) container = link.parentElement?.parentElement?.parentElement;
+      // Look for title text in the container
+      let title = '';
+      if (container) {
+        const titleEl = container.querySelector('#video-title, #title, h3, [class*="title"]');
+        title = titleEl?.textContent?.trim() || '';
+      }
+      if (title) results.push({ title, url: href });
+    }
+    return results;
+  });
+
+  const match = playlists.find(p => p.title === playlistName);
+  if (!match) {
+    const visible = playlists.map(p => p.title).filter(Boolean);
+    throw new Error(`Playlist "${playlistName}" not found in your YouTube library. Visible playlists: ${visible.join(', ') || '(none)'}`);
+  }
+
+  const playlistUrl = match.url;
+
+  // Navigate to the playlist page
+  await page.goto(playlistUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+  await page.waitForTimeout(4000);
+
+  // Scroll the playlist page to load all videos
+  let previousHeight = 0;
+  for (let i = 0; i < 20; i++) {
+    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+    await page.waitForTimeout(2000);
+    const currentHeight = await page.evaluate(() => document.body.scrollHeight);
+    if (currentHeight === previousHeight) break;
+    previousHeight = currentHeight;
+  }
+
+  // Extract videos and their watch status
+  const videos = await page.evaluate(() => {
+    const items = document.querySelectorAll('ytd-playlist-video-renderer');
+    return Array.from(items).map(item => {
+      const titleEl = item.querySelector('#video-title');
+      const title = titleEl?.textContent?.trim() || 'Untitled';
+      const url = titleEl?.closest('a')?.href || '';
+
+      // Check for the watched overlay (progress bar with width %)
+      const progressBar = item.querySelector('ytd-thumbnail-overlay-resume-playback-renderer #progress');
+      let progress = 0;
+      if (progressBar) {
+        const width = progressBar.style?.width;
+        if (width) progress = parseInt(width, 10) || 0;
+      }
+
+      return { title, url, progress };
+    });
+  });
+
+  const completedCount = videos.filter(v => v.progress === 100).length;
+  const inProgressCount = videos.filter(v => v.progress > 0 && v.progress < 100).length;
+  const notStartedCount = videos.filter(v => v.progress === 0).length;
+  return {
+    playlistName,
+    videos,
+    summary: `${completedCount}/${videos.length} completed` +
+      (inProgressCount ? `, ${inProgressCount} in progress` : '') +
+      (notStartedCount ? `, ${notStartedCount} not started` : ''),
+  };
+}
+
+/**
  * Create a YouTube playlist and add videos to it.
  * Uses Playwright's locator API which re-queries the DOM on each action,
  * avoiding stale element issues with YouTube's SPA.

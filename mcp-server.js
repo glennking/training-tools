@@ -3,7 +3,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
-import { launchBrowser, ensureLoggedIn, ensureYouTubeLoggedIn, scrapePlurasightChannel, createYoutubePlaylist } from './lib.js';
+import { launchBrowser, ensureLoggedIn, ensureYouTubeLoggedIn, scrapePlurasightChannel, createYoutubePlaylist, checkPlaylistWatchStatus } from './lib.js';
 
 const server = new McpServer({
   name: 'training-tools',
@@ -126,6 +126,56 @@ server.tool(
     } catch (err) {
       return {
         content: [{ type: 'text', text: `Error during sync: ${err.message}` }],
+        isError: true,
+      };
+    }
+  }
+);
+
+server.tool(
+  'check-watch-status',
+  'Check which videos you have watched in a YouTube playlist that corresponds to a Pluralsight channel. Scrapes the Pluralsight channel to get its title, then finds the matching YouTube playlist and checks watch status for each video.',
+  {
+    channelUrl: z.string().describe('Pluralsight channel URL'),
+    cdpUrl: z.string().optional().describe('Connect to existing Chrome via CDP instead of auto-launching'),
+    headless: z.boolean().optional().default(false).describe('Run Chrome headless (default: false)'),
+  },
+  async ({ channelUrl, cdpUrl, headless }) => {
+    if (!channelUrl.includes('pluralsight.com/channels/')) {
+      return { content: [{ type: 'text', text: 'Error: URL does not look like a Pluralsight channel URL.' }], isError: true };
+    }
+
+    let page;
+    try {
+      page = await getPage({ cdpUrl, headless });
+    } catch (err) {
+      return {
+        content: [{ type: 'text', text: `Error: Failed to launch Chrome: ${err.message}` }],
+        isError: true,
+      };
+    }
+
+    try {
+      await ensureLoggedIn(page, channelUrl);
+      const { channelTitle } = await scrapePlurasightChannel(page, channelUrl);
+
+      await ensureYouTubeLoggedIn(page);
+      const result = await checkPlaylistWatchStatus(page, channelTitle);
+
+      const listing = result.videos.map((v, i) => {
+        const status = v.progress === 100 ? 'COMPLETED' : v.progress > 0 ? `${v.progress}%` : 'NOT STARTED';
+        return `${i + 1}. [${status}] ${v.title}\n   ${v.url}`;
+      }).join('\n');
+
+      return {
+        content: [{
+          type: 'text',
+          text: `Playlist: "${result.playlistName}"\nProgress: ${result.summary}\n\n${listing}`,
+        }],
+      };
+    } catch (err) {
+      return {
+        content: [{ type: 'text', text: `Error checking watch status: ${err.message}` }],
         isError: true,
       };
     }
